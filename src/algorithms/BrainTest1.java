@@ -29,7 +29,7 @@ public class BrainTest1 extends Brain {
         double parameterOrientation = 0;
 
         switch (taskStep) {
-            case 0:
+            case 0, 4:
                 parameterOrientation = Parameters.NORTH;
                 break;
             case 1:
@@ -41,11 +41,10 @@ public class BrainTest1 extends Brain {
             case 3:
                 parameterOrientation = Parameters.WEST;
                 break;
-            case 4:
-                return; // Fin du parcours
+            case 5:
+                return;
         }
 
-        // Ajustement pour prendre en compte les angles négatifs correctement
         if (parameterOrientation < 0) {
             parameterOrientation += 2 * Math.PI;
         }
@@ -56,12 +55,11 @@ public class BrainTest1 extends Brain {
         double headMinus = parameterOrientation - epsilon;
         double headPlus = parameterOrientation + epsilon;
 
-        sendLogMessage(taskStep + " / M : " + headMinus + " / P : " + headPlus + " / O : " + botHeading);
+        sendLogMessage("Task " + taskStep);
 
         if (botHeading >= headMinus && botHeading <= headPlus) {
             if (detectFront().getObjectType() == WALL) {
-                taskStep++; // Incrémentation seulement si un mur est détecté
-                stepTurn(Parameters.Direction.RIGHT); // Tourne à droite avant de continuer
+                taskStep++;
             } else {
                 move();
             }
