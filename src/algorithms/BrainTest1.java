@@ -13,7 +13,6 @@ import characteristics.IFrontSensorResult;
 public class BrainTest1 extends Brain {
 
     private int taskStep;
-    private final double epsilon = 0.05;
     private static final IFrontSensorResult.Types WALL = IFrontSensorResult.Types.WALL;
 
     public BrainTest1() {
@@ -25,6 +24,8 @@ public class BrainTest1 extends Brain {
     }
 
     public void step() {
+
+        double epsilon = 0.05;
         double botHeading = getHeading() % (2 * Math.PI);
         double parameterOrientation = 0;
 

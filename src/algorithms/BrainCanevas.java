@@ -18,6 +18,8 @@ public class BrainCanevas extends Brain {
   }
   public void step() {
     //---PARTIE A MODIFIER/ECRIRE---//
-
+    if (detectFront().getObjectType()==IFrontSensorResult.Types.NOTHING) {
+      move();
+    }
   }
 }
