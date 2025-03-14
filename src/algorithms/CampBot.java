@@ -32,9 +32,9 @@ public class CampBot extends Brain {
     if (finished) { sendLogMessage("Camping point. Task complete.");return; }
     if (turnTask) {
       if (isHeading(endTaskDirection)) {
-	turnTask=false;
+        turnTask=false;
         if (taskOne) endTaskCounter=200; else endTaskCounter=100;
-	move();
+        move();
       } else {
         stepTurn(Parameters.Direction.RIGHT);
       }

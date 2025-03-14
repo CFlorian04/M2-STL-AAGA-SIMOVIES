@@ -37,9 +37,9 @@ public class CampFire extends Brain {
     if (endMove) { sendLogMessage("Camping point. Task one complete."); campFire(); return; }
     if (turnTask) {
       if (isHeading(endTaskDirection)) {
-	turnTask=false;
+        turnTask=false;
         if (taskOne) endTaskCounter=700; else if (id==1) endTaskCounter=400; else endTaskCounter=250;
-	move();
+        move();
       } else {
         if (taskOne) stepTurn(Parameters.Direction.RIGHT);
         else stepTurn(Parameters.Direction.LEFT);
@@ -56,7 +56,7 @@ public class CampFire extends Brain {
       ArrayList<IRadarResult> radarResults = detectRadar();
       for (IRadarResult r : radarResults)
         if (r.getObjectType()==IRadarResult.Types.TeamMainBot ||
-            r.getObjectType()==IRadarResult.Types.TeamSecondaryBot) id++;
+                r.getObjectType()==IRadarResult.Types.TeamSecondaryBot) id++;
       if (id==2) id=3; else if (id==3) id=2;
       if (id==3) {
         endMove=true;
