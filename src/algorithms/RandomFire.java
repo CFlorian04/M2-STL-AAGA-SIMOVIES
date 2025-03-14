@@ -44,17 +44,17 @@ public class RandomFire extends Brain {
       if (isHeading(endTaskDirection)) {
         if (firstMove) {
           firstMove=false;
-  	  turnTask=false;
+          turnTask=false;
           moveTask=true;
           endTaskCounter=400;
-	  move();
+          move();
           sendLogMessage("Moving a head. Waza!");
           return;
         }
-	turnTask=false;
+        turnTask=false;
         moveTask=true;
         endTaskCounter=200;
-	move();
+        move();
         sendLogMessage("Moving a head. Waza!");
       } else {
         if (turnRight) stepTurn(Parameters.Direction.RIGHT);
