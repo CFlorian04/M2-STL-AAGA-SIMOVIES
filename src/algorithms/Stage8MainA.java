@@ -223,7 +223,6 @@ public class Stage8MainA extends Brain {
 
         if (myX<=x) fire(Math.atan((y-myY)/(double)(x-myX)));
         else fire(Math.PI+Math.atan((y-myY)/(double)(x-myX)));
-        return;
     }
     private boolean onTheWay(double angle){
         if (myX<=targetX) return isRoughlySameDirection(angle,Math.atan((targetY-myY)/(double)(targetX-myX)));
