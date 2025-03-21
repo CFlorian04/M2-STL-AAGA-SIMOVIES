@@ -11,6 +11,7 @@ public class MecaMouseSecondary extends Brain {
     // Constantes de précision et d'identification
     private static final double ANGLE_PRECISION = 0.025;
     private static final double FIRE_ANGLE_PRECISION = Math.PI / 6;
+    private static final int BOT_RADIUS = (int) Parameters.teamAMainBotRadius;
     private static final int ROCKY = 0x004;
     private static final int MARIO = 0x005;
 
@@ -19,8 +20,8 @@ public class MecaMouseSecondary extends Brain {
     private static final int DEAD = 0x102;
     private static final int ELIMINATION = 0x103;
     private static final int SECONDARYINPOSITION = 0x104;
-    private static final int POSITION = 0x105;
-    private static final int ALLY_POSITION = 0x106; // Nouveau type de message pour les positions des alliés
+    private static final int UNUSED = 0x105;
+    private static final int ALLY_POSITION = 0x106;
 
     // Enumération des instructions possibles pour le robot
     private enum INSTRUCTIONS {
@@ -34,28 +35,28 @@ public class MecaMouseSecondary extends Brain {
     private int PLAYGROUND_HEIGHT = 2000;
 
     // Variables d'état du robot
-    private boolean IsOnLeft;
-    private INSTRUCTIONS instruction;
-    private int whoAmI;
-    private Position myPosition;
+    private Bot currentBot;
+    private boolean isTeamA = false;
+    private INSTRUCTIONS instruction = INSTRUCTIONS.BASE;
     private String robotName;
     private double directionToGo;
-    private boolean isMoving;
-    private boolean isSecondaryInPosition;
+    private boolean isMoving = false;
+    private boolean isSecondaryInPosition = false;
+    private boolean isInPosition = false;
 
     // Compteurs pour suivre le nombre de robots vivants
-    private int countMainAlive;
-    private int countSecondaryAlive;
+    private int countMainAlive = 3;
+    private int countSecondaryAlive = 2;
 
     // Variables pour suivre la position de la cible ennemie
     private static final int MAX_ENEMY_POSITION_TIME = 500;
-    private HashMap<Enemy, Integer> enemyPositions = new HashMap<>();
-    private ArrayList<Position> wrecksPositions = new ArrayList<>();
+    private Position targetPosition = new Position(-1, -1);
 
-    private Position targetPosition;
+    // Variables pour suivre les positions des alliés, des ennemis et des épaves
+    private ArrayList<Bot> allies = new ArrayList<>();
+    private ArrayList<Enemy> enemies = new ArrayList<>();
+    private ArrayList<Position> wrecks = new ArrayList<>();
 
-    // Liste pour stocker les positions des alliés
-    private HashMap<Integer, Position> allyPositions = new HashMap<>();
 
     // Constructeur par défaut
     public MecaMouseSecondary() {
@@ -97,108 +98,136 @@ public class MecaMouseSecondary extends Brain {
         }
     }
 
-    // Fonctions d'initialisation
-
     /**
      * Initialise les variables et l'état du robot.
      */
     private void init() {
-        initWhoAmI(); // Initialise l'identité du robot
-        initRobotName(); // Initialise le nom du robot
-        initPosition(); // Initialise la position du robot
 
-        // Initialisation des autres variables d'état
-        instruction = INSTRUCTIONS.BASE;
-        countMainAlive = 3;
-        countSecondaryAlive = 2;
-        directionToGo = Parameters.EAST;
-        targetPosition = new Position(0, 0);
-    }
+        // Déterminer sur quelle équipe le robot se trouve
+        if(Parameters.teamAMainBotBrainClassName.contains("MecaMouse")) {
+            isTeamA = true;
+        } else {
+            isTeamA = false;
+        }
 
-    /**
-     * Détermine l'identité du robot en fonction de la direction des autres robots détectés.
-     */
-    private void initWhoAmI() {
-        whoAmI = ROCKY;
+        // Déterminer le sens de déplacement initial
+        if(isTeamA) {
+            directionToGo = Parameters.EAST;
+        } else {
+            directionToGo = Parameters.WEST;
+        }
+
+        // Déterminer l'identité du robot
+        int botID = ROCKY;
         for (IRadarResult o : detectRadar()) {
             if (isSameDirection(o.getObjectDirection(), Parameters.NORTH)) {
-                whoAmI = MARIO;
+                botID = MARIO;
             }
         }
-    }
 
-    /**
-     * Initialise la position du robot en fonction de son identité.
-     */
-    private void initPosition() {
-        if (whoAmI == ROCKY) {
-            myPosition = new Position((int) Parameters.teamASecondaryBot1InitX, (int) Parameters.teamASecondaryBot1InitY);
-        } else {
-            myPosition = new Position((int) Parameters.teamASecondaryBot2InitX, (int) Parameters.teamASecondaryBot2InitY);
+        // Déterminer le type de robot
+        IRadarResult.Types botType = IRadarResult.Types.TeamSecondaryBot;
+
+        // Déterminer la position du robot en fonction de son identité
+        Position botPosition = new Position(0, 0);
+        switch (botID) {
+            case ROCKY:
+                if (isTeamA) {
+                    botPosition = new Position((int) Parameters.teamASecondaryBot1InitX, (int) Parameters.teamASecondaryBot1InitY);
+                } else {
+                    botPosition = new Position((int) Parameters.teamBSecondaryBot1InitX, (int) Parameters.teamBSecondaryBot1InitY);
+                }
+                break;
+            case MARIO:
+                if (isTeamA) {
+                    botPosition = new Position((int) Parameters.teamASecondaryBot2InitX, (int) Parameters.teamASecondaryBot2InitY);
+                } else {
+                    botPosition = new Position((int) Parameters.teamBSecondaryBot2InitX, (int) Parameters.teamBSecondaryBot2InitY);
+                }
+                break;
+            default:
+                break;
         }
-    }
 
-    /**
-     * Initialise le nom du robot en fonction de son identité.
-     */
-    private void initRobotName() {
-        robotName = switch (whoAmI) {
+        // Déterminer l'orientation du robot
+        double botHeading = myGetHeading();
+
+        // Déterminer le nom
+        robotName = switch (botID) {
             case ROCKY -> "#ROCKY";
             case MARIO -> "#MARIO";
             default -> "#UNKNOWN";
         };
-    }
 
-    // Fonctions d'instructions
+        // Création du bot
+        currentBot = new Bot(botID, botType, botPosition, botHeading);
+
+    }
 
     /**
      * Exécute l'instruction de base : gère le mouvement en fonction de l'identité du robot.
      */
     private void instruction_base() {
-        if (whoAmI == ROCKY) {
+        if (currentBot.id == ROCKY) {
             // Se mettre sur la bonne ligne
-            if (myPosition.y >= Parameters.teamASecondaryBotFrontalDetectionRange) {
+            if (currentBot.y >= Parameters.teamASecondaryBotFrontalDetectionRange) {
                 if (isSameDirection(myGetHeading(), Parameters.NORTH)) {
                     moveForward();
-                    if (!isSecondaryInPosition) {
-                        isSecondaryInPosition = true;
-                        sendBroadcastMessage(SECONDARYINPOSITION, 0, 0, 0);
-                    }
                 } else {
-                    stepTurn(Parameters.Direction.LEFT);
+                    if(isTeamA) {
+                        stepTurn(Parameters.Direction.LEFT);
+                    } else {
+                        stepTurn(Parameters.Direction.RIGHT);
+                    }
                 }
                 return;
             }
+            if (!isSecondaryInPosition) {
+                isSecondaryInPosition = true;
+                sendBroadcastMessage(SECONDARYINPOSITION, "true");
+            }
         }
 
-        if (whoAmI == MARIO) {
+        if (currentBot.id== MARIO) {
             // Se mettre sur la bonne ligne
-            if (myPosition.y <= PLAYGROUND_HEIGHT - Parameters.teamASecondaryBotFrontalDetectionRange) {
+            if (currentBot.y <= PLAYGROUND_HEIGHT - Parameters.teamASecondaryBotFrontalDetectionRange) {
                 if (isSameDirection(myGetHeading(), Parameters.SOUTH)) {
                     moveForward();
-                    if (!isSecondaryInPosition) {
-                        isSecondaryInPosition = true;
-                        sendBroadcastMessage(SECONDARYINPOSITION, 0, 0, 0);
-                    }
                 } else {
-                    stepTurn(Parameters.Direction.RIGHT);
+                    if(isTeamA) {
+                        stepTurn(Parameters.Direction.RIGHT);
+                    } else {
+                        stepTurn(Parameters.Direction.LEFT);
+                    }
                 }
                 return;
+            }
+
+            if (!isSecondaryInPosition) {
+                isSecondaryInPosition = true;
+                sendBroadcastMessage(SECONDARYINPOSITION, "true");
             }
         }
 
         if (isSameDirection(myGetHeading(), directionToGo)) {
             if (detectFront().getObjectType() != IFrontSensorResult.Types.NOTHING) {
-                System.out.println(detectFront().toString());
                 reverseDirectionToGo();
             } else {
                 moveForward();
             }
         } else {
-            if (whoAmI == ROCKY) {
-                stepTurn(Parameters.Direction.RIGHT);
+            if (currentBot.id == ROCKY) {
+                if(isTeamA) {
+                    stepTurn(Parameters.Direction.RIGHT);
+                } else {
+                    stepTurn(Parameters.Direction.LEFT);
+                }
             } else {
-                stepTurn(Parameters.Direction.LEFT);
+                if(isTeamA) {
+                    stepTurn(Parameters.Direction.LEFT);
+                } else {
+                    stepTurn(Parameters.Direction.RIGHT);
+                }
             }
         }
     }
@@ -217,8 +246,6 @@ public class MecaMouseSecondary extends Brain {
         // Implémentation pour l'instruction NO_MAIN_LEFT
     }
 
-    // Fonctions de communication
-
     /**
      * Lit tous les messages diffusés et les traite.
      */
@@ -235,31 +262,21 @@ public class MecaMouseSecondary extends Brain {
      * @param message le message à traiter
      */
     private void processMessage(String message) {
-        String[] parts = message.split(":");
-        if (parts.length < 5) {
-            // Message invalide, ignore
-            return;
-        }
+        String[] parts = message.split("#");
 
         int bot = Integer.parseInt(parts[0]);
         int type = Integer.parseInt(parts[1]);
-        int arg1 = Integer.parseInt(parts[2]);
-        int arg2 = Integer.parseInt(parts[3]);
-        int arg3 = Integer.parseInt(parts[4]);
+        String content = parts[2];
 
         switch (type) {
             case DETECTION:
-                updateEnemyPosition(new Enemy(arg1, arg2, arg3, Parameters.teamAMainBotSpeed), 0);
-                break;
-            case POSITION:
-                updateEnemyPosition(new Enemy(arg1, arg2, arg3, Parameters.teamAMainBotSpeed), 0);
+                //processDetectionMessage(bot, content);
                 break;
             case DEAD:
-                Position position = new Position(arg1, arg2);
-                addWreck(position);
+                processDeadMessage(content);
                 break;
             case ALLY_POSITION:
-                allyPositions.put(bot, new Position(arg1, arg2));
+                processAlliesPositionMessage(content);
                 break;
             default:
                 // Type de message inconnu, ignore
@@ -268,36 +285,93 @@ public class MecaMouseSecondary extends Brain {
     }
 
     /**
+     * Traite un message de détection d'un ennemi.
+     *
+     * @param bot     l'identifiant du robot ayant détecté l'ennemi
+     * @param message le message de détection
+     */
+    private void processDetectionMessage(int bot, String message) {
+        String[] parts = message.split(":");
+
+        int botId = Integer.parseInt(parts[0]);
+        IRadarResult.Types botType = IRadarResult.Types.valueOf(parts[1]);
+        Position botPosition = new Position(Integer.parseInt(parts[2]), Integer.parseInt(parts[3]));
+        double botHeading = Double.parseDouble(parts[4]);
+        int botTimeLastDetected = Integer.parseInt(parts[5]);
+
+        Enemy enemy = new Enemy(botType, botPosition, botHeading, botTimeLastDetected);
+        enemies.add(enemy);
+    }
+
+    /**
+     * Traite un message de mort d'un ennemi.
+     *
+     * @param message le message de mort
+     */
+    private void processDeadMessage(String message) {
+        String[] parts = message.split(":");
+        Position wreckPosition = new Position(Integer.parseInt(parts[0]), Integer.parseInt(parts[1]));
+        addWreck(wreckPosition);
+    }
+
+    /**
+     * Traite un message de position d'un allié.
+     *
+     * @param message le message de position
+     */
+    private void processAlliesPositionMessage(String message) {
+        String[] parts = message.split(":");
+
+        int botId = Integer.parseInt(parts[0]);
+        IRadarResult.Types botType = IRadarResult.Types.valueOf(parts[1]);
+        Position botPosition = new Position(Integer.parseInt(parts[2]), Integer.parseInt(parts[3]));
+        double botHeading = Double.parseDouble(parts[4]);
+
+        if (botId == currentBot.id) {
+            return;
+        }
+
+        Bot newAllie = new Bot(botId, botType, botPosition, botHeading);
+
+        for (Bot allie : allies) {
+            if (allie.id == botId) {
+                allie.position = botPosition;
+                allie.direction = botHeading;
+                return;
+            }
+        }
+
+        allies.add(newAllie);
+    }
+
+    /**
      * Envoie un message diffusé avec les informations spécifiées.
      *
      * @param type le type de message
      * @param arg1 le premier argument du message
      * @param arg2 le second argument du message
-     * @param arg3 le troisième argument du message
      */
-    private void sendBroadcastMessage(int type, int arg1, int arg2, int arg3) {
-        String message = whoAmI + ":" + type + ":" + arg1 + ":" + arg2 + ":" + arg3;
-        broadcast(message);
+    private void sendBroadcastMessage(int type, String message) {
+        String toSend = currentBot.id + "#" + type + "#" + message;
+        broadcast(toSend);
+        if(type == SECONDARYINPOSITION) {
+            sendLogMessage(toSend);
+        }
     }
 
     /**
      * Diffuse la position actuelle du robot.
      */
     private void broadcastOwnPosition() {
-        sendBroadcastMessage(ALLY_POSITION, myPosition.x, myPosition.y, 0);
+        sendBroadcastMessage(ALLY_POSITION, currentBot.toString());
     }
-
-    // Fonctions de logs
 
     /**
      * Affiche des informations de débogage dans les logs.
      */
     private void showLogDetails() {
-        sendLogMessage(robotName + " [" + myPosition.x + ", " + myPosition.y + "] / Target [" + targetPosition.x + ", " + targetPosition.y + "]");
-        sendLogMessage(enemyPositionToString());
+        sendLogMessage(currentBot.details());
     }
-
-    // Fonction de tir
 
     /**
      * Calcule la distance jusqu'à la cible.
@@ -306,10 +380,8 @@ public class MecaMouseSecondary extends Brain {
      * @return la distance jusqu'à la cible
      */
     private int calculateDistanceToTarget(Position position) {
-        return (int) Math.sqrt((position.y - myPosition.y) * (position.y - myPosition.y) + (position.x - myPosition.x) * (position.x - myPosition.x));
+        return (int) Math.sqrt((position.y - currentBot.y) * (position.y - currentBot.y) + (position.x - currentBot.x) * (position.x - currentBot.x));
     }
-
-    // Fonctions de mouvement
 
     /**
      * Avance le robot.
@@ -342,11 +414,9 @@ public class MecaMouseSecondary extends Brain {
      * @param speed la vitesse de déplacement
      */
     private void updatePosition(int speed) {
-        myPosition.x += (int) (speed * Math.cos(myGetHeading()));
-        myPosition.y += (int) (speed * Math.sin(myGetHeading()));
+        currentBot.x += (int) (speed * Math.cos(myGetHeading()));
+        currentBot.y += (int) (speed * Math.sin(myGetHeading()));
     }
-
-    // Fonctions de direction
 
     /**
      * Vérifie si deux directions sont similaires.
@@ -392,62 +462,52 @@ public class MecaMouseSecondary extends Brain {
         return (int) Math.sqrt((position1.y - position2.y) * (position1.y - position2.y) + (position1.x - position2.x) * (position1.x - position2.x));
     }
 
-    // Fonctions de radar
-
     /**
      * Détecte les objets avec le radar et diffuse les informations sur les ennemis.
      */
     private void radarDetection() {
         for (IRadarResult o : detectRadar()) {
-            int enemyX = myPosition.x + (int) (o.getObjectDistance() * Math.cos(o.getObjectDirection()));
-            int enemyY = myPosition.y + (int) (o.getObjectDistance() * Math.sin(o.getObjectDirection()));
+            int enemyX = currentBot.x + (int) (o.getObjectDistance() * Math.cos(o.getObjectDirection()));
+            int enemyY = currentBot.y + (int) (o.getObjectDistance() * Math.sin(o.getObjectDirection()));
 
             if (o.getObjectType() == IRadarResult.Types.OpponentMainBot || o.getObjectType() == IRadarResult.Types.OpponentSecondaryBot) {
-                sendBroadcastMessage(DETECTION, enemyX, enemyY, 0);
-                updateEnemyPosition(new Enemy(enemyX, enemyY, o.getObjectDirection(), Parameters.teamAMainBotSpeed), 0);
+                //sendBroadcastMessage(DETECTION, enemyX, enemyY, 0);
+                Enemy enemy = new Enemy(o.getObjectType(), new Position(enemyX, enemyY), o.getObjectDirection(), 0);
+                addNewEnemy(enemy);
 
-                int distanceToTarget = calculateDistanceToTarget(new Position(enemyX, enemyY));
-
-                // S'il se rapproche de l'ennemi faire demi-tour
-                if (distanceToTarget < calculateDistanceToTarget(targetPosition) && distanceToTarget <= 0.6 * Parameters.teamASecondaryBotFrontalDetectionRange) {
+                if (o.getObjectDistance() <= Parameters.teamASecondaryBotFrontalDetectionRange - BOT_RADIUS*2) {
                     reverseDirectionToGo();
                 }
-
-                targetPosition = new Position(enemyX, enemyY);
             }
-
             if (o.getObjectType() == IRadarResult.Types.Wreck) {
+
                 Position position = new Position(enemyX, enemyY);
                 addWreck(position);
-                sendBroadcastMessage(DEAD, position.x, position.y, 0);
+                sendBroadcastMessage(DEAD, position.toString());
 
             }
         }
     }
 
-    // Fonctions sur Ennemies
-
     /**
      * Met à jour la position de l'ennemi.
      *
-     * @param enemy l'ennemi à mettre à jour
+     * @param enemy        l'ennemi à mettre à jour
      * @param timeDetected le temps de détection
      */
-    private void updateEnemyPosition(Enemy enemy, int timeDetected) {
+    private void addNewEnemy(Enemy enemy) {
         ArrayList<Enemy> toRemove = new ArrayList<>();
-        for (Enemy existingEnemy : enemyPositions.keySet()) {
+        for (Enemy existingEnemy : enemies) {
             // Si la position est dans le rayon de la position déjà enregistrée
-            if (existingEnemy.isInRadius(enemy) && enemyPositions.get(existingEnemy) > timeDetected) {
+            if (existingEnemy.isInRadius(enemy) && enemy.timeLastDetected > existingEnemy.timeLastDetected) {
                 toRemove.add(existingEnemy);
             }
         }
         for (Enemy enemyToRemove : toRemove) {
             removeEnnemyPosition(enemyToRemove);
         }
-        // Si l'ennemi n'est pas déjà enregistré
-        if (!enemyPositions.containsKey(enemy)) {
-            enemyPositions.put(enemy, timeDetected);
-        }
+
+        enemies.add(enemy);
     }
 
     /**
@@ -457,13 +517,13 @@ public class MecaMouseSecondary extends Brain {
      */
     private void removeEnnemyPosition(Enemy enemy) {
         ArrayList<Enemy> toRemove = new ArrayList<>();
-        for (Enemy existingEnemy : enemyPositions.keySet()) {
-            if (existingEnemy.equals(enemy) || existingEnemy.isInRadius(enemy)) {
+        for (Enemy existingEnemy : enemies) {
+            if ((existingEnemy.equals(enemy) || existingEnemy.isInRadius(enemy)) && enemy.timeLastDetected < existingEnemy.timeLastDetected) {
                 toRemove.add(existingEnemy);
             }
         }
         for (Enemy enemyToRemove : toRemove) {
-            enemyPositions.remove(enemyToRemove);
+            enemies.remove(enemyToRemove);
         }
     }
 
@@ -471,49 +531,44 @@ public class MecaMouseSecondary extends Brain {
      * Incrémente le temps de position de l'ennemi.
      */
     private void incrementEnemyPositionTime() {
-        ArrayList<Enemy> toRemoveByTime = new ArrayList<>();
-        for (Enemy enemy : enemyPositions.keySet()) {
-            if (enemyPositions.get(enemy) > MAX_ENEMY_POSITION_TIME) {
-                toRemoveByTime.add(enemy);
-            } else {
-                enemyPositions.put(enemy, enemyPositions.get(enemy) + 1);
-            }
-        }
-        for (Enemy enemy : toRemoveByTime) {
-            removeEnnemyPosition(enemy);
-        }
 
-        List<Enemy> toRemoveByPosition = new ArrayList<>();
-        for (Enemy enemyBot1 : enemyPositions.keySet()) {
-            for (Enemy enemyBot2 : enemyPositions.keySet()) {
-                if (enemyBot1.equals(enemyBot2)) {
+        ArrayList<Enemy> toRemove = new ArrayList<>();
+
+        for (Enemy enemy1 : enemies) {
+
+            // Si une épave est à la position
+            for (Position wreck : wrecks) {
+                if (enemy1.position == wreck) {
+                    toRemove.add(enemy1);
+                }
+            }
+
+            // Si le temps est dépassé
+            if (enemy1.timeLastDetected >= MAX_ENEMY_POSITION_TIME) {
+                toRemove.add(enemy1);
+                continue;
+            }
+
+            for (Enemy enemy2 : enemies) {
+                if (enemy1.equals(enemy2)) {
                     continue;
                 }
-                if (enemyBot1.isInRadius(enemyBot2)) {
-                    if (enemyPositions.get(enemyBot1) > enemyPositions.get(enemyBot2)) {
-                        toRemoveByPosition.add(enemyBot2);
+                if (toRemove.contains(enemy1)) {
+                    continue;
+                }
+
+                if (enemy1.isInRadius(enemy2)) {
+                    if (enemy1.timeLastDetected > enemy2.timeLastDetected) {
+                        toRemove.add(enemy1);
                     } else {
-                        toRemoveByPosition.add(enemyBot1);
+                        toRemove.add(enemy2);
                     }
                 }
             }
         }
-        for (Enemy enemy : toRemoveByPosition) {
-            removeEnnemyPosition(enemy);
-        }
-        for (Position wreckPosition : wrecksPositions) {
-            removeEnnemyPosition(new Enemy(wreckPosition.x, wreckPosition.y, 0, 0));
-        }
 
+        enemies.removeAll(toRemove);
         broadcastEnemyPositions();
-    }
-
-    private String enemyPositionToString() {
-        StringBuilder sb = new StringBuilder();
-        for (Enemy enemy : enemyPositions.keySet()) {
-            sb.append("[").append(enemy.x).append(", ").append(enemy.y).append("] | ");
-        }
-        return sb.toString();
     }
 
     /**
@@ -523,94 +578,40 @@ public class MecaMouseSecondary extends Brain {
      */
     private void addWreck(Position position) {
         boolean isNewWreck = true;
-        for (Position wreck : wrecksPositions) {
+        for (Position wreck : wrecks) {
             if (wreck.equals(position) || wreck.isInRadius(position)) {
                 isNewWreck = false;
             }
         }
         if (isNewWreck) {
-            wrecksPositions.add(position);
+            wrecks.add(position);
         }
-        removeEnnemyPosition(new Enemy(position.x, position.y, 0, 0));
-    }
-
-    /**
-     * Affiche les positions des épaves dans les logs.
-     */
-    private String wrecksPositionToString() {
-        StringBuilder sb = new StringBuilder();
-        for (Position position : wrecksPositions) {
-            sb.append("[").append(position.x).append(", ").append(position.y).append("] | ");
-        }
-        return sb.toString();
     }
 
     /**
      * Broadcast les positions des ennemis
      */
     private void broadcastEnemyPositions() {
-        for (Enemy enemy : enemyPositions.keySet()) {
-            sendBroadcastMessage(POSITION, enemy.x, enemy.y, enemyPositions.get(enemy));
+        for (Enemy enemy : enemies) {
+            sendBroadcastMessage(DETECTION, enemy.toString());
         }
     }
 
-    // Classe pour représenter une position
-    private static class Position {
-        int x, y;
-
-        Position(int x, int y) {
-            this.x = x;
-            this.y = y;
-        }
-
-        @Override
-        public boolean equals(Object o) {
-            if (this == o) return true;
-            if (o == null || getClass() != o.getClass()) return false;
-            Position position = (Position) o;
-            return x == position.x && y == position.y;
-        }
-
-        public boolean isInRadius(Object o) {
-            if (this == o) return true;
-            if (o == null || getClass() != o.getClass()) return false;
-            Position position = (Position) o;
-            return Math.sqrt((x - position.x) * (x - position.x) + (y - position.y) * (y - position.y)) <= Parameters.teamAMainBotRadius;
-        }
-
-        @Override
-        public int hashCode() {
-            return Objects.hash(x, y);
-        }
-    }
-
-    // Classe pour représenter un ennemi avec une position et une direction
-    private static class Enemy extends Position {
-        double direction;
-        double speed;
-
-        Enemy(int x, int y, double direction, double speed) {
+    static class Position extends MecaMouseMain.Position {
+        public Position(int x, int y) {
             super(x, y);
-            this.direction = direction;
-            this.speed = speed;
         }
+    }
 
-        @Override
-        public boolean equals(Object o) {
-            if (this == o) return true;
-            if (o == null || getClass() != o.getClass()) return false;
-            if (!super.equals(o)) return false;
-            Enemy enemy = (Enemy) o;
-            return Double.compare(enemy.direction, direction) == 0 && Double.compare(enemy.speed, speed) == 0;
+    static class Bot extends MecaMouseMain.Bot {
+        public Bot(int id, IRadarResult.Types type, Position position, double heading) {
+            super(id, type, position, heading);
         }
+    }
 
-        @Override
-        public int hashCode() {
-            return Objects.hash(super.hashCode(), direction, speed);
-        }
-
-        public boolean isInRadius(Enemy other) {
-            return super.isInRadius(other) && Math.abs(normalizeRadian(this.direction - other.direction)) < ANGLE_PRECISION;
+    static class Enemy extends MecaMouseMain.Enemy {
+        public Enemy(IRadarResult.Types type, Position position, double direction, int timeLastDetected) {
+            super(type, position, direction, timeLastDetected);
         }
     }
 }
