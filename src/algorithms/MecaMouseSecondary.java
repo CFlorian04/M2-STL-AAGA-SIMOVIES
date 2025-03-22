@@ -9,7 +9,7 @@ import java.util.*;
 
 public class MecaMouseSecondary extends Brain {
     // Constantes de précision et d'identification
-    private static final double ANGLE_PRECISION = 0.025;
+    private static final double ANGLE_PRECISION = 0.05;
     private static final double FIRE_ANGLE_PRECISION = Math.PI / 6;
     private static final int BOT_RADIUS = (int) Parameters.teamAMainBotRadius;
     private static final int ROCKY = 0x004;
@@ -48,9 +48,12 @@ public class MecaMouseSecondary extends Brain {
     private int countMainAlive = 3;
     private int countSecondaryAlive = 2;
 
+    private static final int ESCAPE_TIME = 200;
+    private int escapeTime = 0;
+    private boolean isEscaping = false;
+
     // Variables pour suivre la position de la cible ennemie
     private static final int MAX_ENEMY_POSITION_TIME = 500;
-    private Position targetPosition = new Position(-1, -1);
 
     // Variables pour suivre les positions des alliés, des ennemis et des épaves
     private ArrayList<Bot> allies = new ArrayList<>();
@@ -76,13 +79,25 @@ public class MecaMouseSecondary extends Brain {
      */
     @Override
     public void step() {
-        showLogDetails(); // Affichage des informations de débogage
+        showLogDetails(); // Affiche les détails de log pour le débogage
         radarDetection(); // Détection des objets avec le radar
-        readBroadcast(); // Lecture des messages diffusés par les autres robots
-        incrementEnemyPositionTime(); // Incrémentation du temps de position des ennemis
         broadcastOwnPosition(); // Diffusion de la position actuelle du robot
 
+        readBroadcast(); // Lecture des messages diffusés par les autres robots
+
+        incrementEnemyPositionTime(); // Incrémentation du temps de position des ennemis
+
         isMoving = false;
+
+        if (isEscaping) {
+            escapeTime++;
+            moveBackward();
+            if (escapeTime >= ESCAPE_TIME) {
+                isEscaping = false;
+                escapeTime = 0;
+            }
+            return;
+        }
 
         // Exécution de l'instruction en cours
         switch (instruction) {
@@ -104,14 +119,14 @@ public class MecaMouseSecondary extends Brain {
     private void init() {
 
         // Déterminer sur quelle équipe le robot se trouve
-        if(Parameters.teamAMainBotBrainClassName.contains("MecaMouse")) {
+        if (Parameters.teamAMainBotBrainClassName.contains("MecaMouse")) {
             isTeamA = true;
         } else {
             isTeamA = false;
         }
 
         // Déterminer le sens de déplacement initial
-        if(isTeamA) {
+        if (isTeamA) {
             directionToGo = Parameters.EAST;
         } else {
             directionToGo = Parameters.WEST;
@@ -162,6 +177,9 @@ public class MecaMouseSecondary extends Brain {
         // Création du bot
         currentBot = new Bot(botID, botType, botPosition, botHeading);
 
+        enemies.clear();
+        wrecks.clear();
+        allies.clear();
     }
 
     /**
@@ -170,11 +188,11 @@ public class MecaMouseSecondary extends Brain {
     private void instruction_base() {
         if (currentBot.id == ROCKY) {
             // Se mettre sur la bonne ligne
-            if (currentBot.y >= Parameters.teamASecondaryBotFrontalDetectionRange) {
+            if (currentBot.position.y >= Parameters.teamASecondaryBotFrontalDetectionRange) {
                 if (isSameDirection(myGetHeading(), Parameters.NORTH)) {
                     moveForward();
                 } else {
-                    if(isTeamA) {
+                    if (isTeamA) {
                         stepTurn(Parameters.Direction.LEFT);
                     } else {
                         stepTurn(Parameters.Direction.RIGHT);
@@ -188,13 +206,13 @@ public class MecaMouseSecondary extends Brain {
             }
         }
 
-        if (currentBot.id== MARIO) {
+        if (currentBot.id == MARIO) {
             // Se mettre sur la bonne ligne
-            if (currentBot.y <= PLAYGROUND_HEIGHT - Parameters.teamASecondaryBotFrontalDetectionRange) {
+            if (currentBot.position.y <= PLAYGROUND_HEIGHT - Parameters.teamASecondaryBotFrontalDetectionRange) {
                 if (isSameDirection(myGetHeading(), Parameters.SOUTH)) {
                     moveForward();
                 } else {
-                    if(isTeamA) {
+                    if (isTeamA) {
                         stepTurn(Parameters.Direction.RIGHT);
                     } else {
                         stepTurn(Parameters.Direction.LEFT);
@@ -217,13 +235,13 @@ public class MecaMouseSecondary extends Brain {
             }
         } else {
             if (currentBot.id == ROCKY) {
-                if(isTeamA) {
+                if (isTeamA) {
                     stepTurn(Parameters.Direction.RIGHT);
                 } else {
                     stepTurn(Parameters.Direction.LEFT);
                 }
             } else {
-                if(isTeamA) {
+                if (isTeamA) {
                     stepTurn(Parameters.Direction.LEFT);
                 } else {
                     stepTurn(Parameters.Direction.RIGHT);
@@ -270,7 +288,7 @@ public class MecaMouseSecondary extends Brain {
 
         switch (type) {
             case DETECTION:
-                //processDetectionMessage(bot, content);
+                processDetectionMessage(bot, content);
                 break;
             case DEAD:
                 processDeadMessage(content);
@@ -300,7 +318,8 @@ public class MecaMouseSecondary extends Brain {
         int botTimeLastDetected = Integer.parseInt(parts[5]);
 
         Enemy enemy = new Enemy(botType, botPosition, botHeading, botTimeLastDetected);
-        enemies.add(enemy);
+        addNewEnemy(enemy);
+
     }
 
     /**
@@ -345,16 +364,14 @@ public class MecaMouseSecondary extends Brain {
     }
 
     /**
-     * Envoie un message diffusé avec les informations spécifiées.
+     * Envoie un message en broadcast.
      *
-     * @param type le type de message
-     * @param arg1 le premier argument du message
-     * @param arg2 le second argument du message
+     * @param message le message à envoyer
      */
     private void sendBroadcastMessage(int type, String message) {
         String toSend = currentBot.id + "#" + type + "#" + message;
         broadcast(toSend);
-        if(type == SECONDARYINPOSITION) {
+        if (type == SECONDARYINPOSITION) {
             sendLogMessage(toSend);
         }
     }
@@ -370,7 +387,7 @@ public class MecaMouseSecondary extends Brain {
      * Affiche des informations de débogage dans les logs.
      */
     private void showLogDetails() {
-        sendLogMessage(currentBot.details());
+        sendLogMessage(robotName + " [" + currentBot.position.toString() + "]");
     }
 
     /**
@@ -380,7 +397,7 @@ public class MecaMouseSecondary extends Brain {
      * @return la distance jusqu'à la cible
      */
     private int calculateDistanceToTarget(Position position) {
-        return (int) Math.sqrt((position.y - currentBot.y) * (position.y - currentBot.y) + (position.x - currentBot.x) * (position.x - currentBot.x));
+        return (int) Math.sqrt((position.y - currentBot.position.y) * (position.y - currentBot.position.y) + (position.x - currentBot.position.x) * (position.x - currentBot.position.x));
     }
 
     /**
@@ -396,6 +413,12 @@ public class MecaMouseSecondary extends Brain {
      * Recule le robot.
      */
     private void moveBackward() {
+
+        // Vérifier si le robot ne sort pas du terrain
+        if(currentBot.position.x - (int) (Parameters.teamASecondaryBotSpeed * Math.cos(myGetHeading())) < 0 || currentBot.position.y - (int) (Parameters.teamASecondaryBotSpeed * Math.sin(myGetHeading())) < 0) {
+            return;
+        }
+
         moveBack();
         updatePosition(-(int) Parameters.teamASecondaryBotSpeed);
         isMoving = true;
@@ -414,8 +437,8 @@ public class MecaMouseSecondary extends Brain {
      * @param speed la vitesse de déplacement
      */
     private void updatePosition(int speed) {
-        currentBot.x += (int) (speed * Math.cos(myGetHeading()));
-        currentBot.y += (int) (speed * Math.sin(myGetHeading()));
+        currentBot.position.x += (int) (speed * Math.cos(myGetHeading()));
+        currentBot.position.y += (int) (speed * Math.sin(myGetHeading()));
     }
 
     /**
@@ -467,16 +490,17 @@ public class MecaMouseSecondary extends Brain {
      */
     private void radarDetection() {
         for (IRadarResult o : detectRadar()) {
-            int enemyX = currentBot.x + (int) (o.getObjectDistance() * Math.cos(o.getObjectDirection()));
-            int enemyY = currentBot.y + (int) (o.getObjectDistance() * Math.sin(o.getObjectDirection()));
+            int enemyX = currentBot.position.x + (int) (o.getObjectDistance() * Math.cos(o.getObjectDirection()));
+            int enemyY = currentBot.position.y + (int) (o.getObjectDistance() * Math.sin(o.getObjectDirection()));
 
             if (o.getObjectType() == IRadarResult.Types.OpponentMainBot || o.getObjectType() == IRadarResult.Types.OpponentSecondaryBot) {
-                //sendBroadcastMessage(DETECTION, enemyX, enemyY, 0);
+
                 Enemy enemy = new Enemy(o.getObjectType(), new Position(enemyX, enemyY), o.getObjectDirection(), 0);
                 addNewEnemy(enemy);
+                sendBroadcastMessage(DETECTION, enemy.toString());
 
-                if (o.getObjectDistance() <= Parameters.teamASecondaryBotFrontalDetectionRange - BOT_RADIUS*2) {
-                    reverseDirectionToGo();
+                if (o.getObjectDistance() <= Parameters.teamASecondaryBotFrontalDetectionRange - 200) {
+                    isEscaping = true;
                 }
             }
             if (o.getObjectType() == IRadarResult.Types.Wreck) {
@@ -490,42 +514,27 @@ public class MecaMouseSecondary extends Brain {
     }
 
     /**
-     * Met à jour la position de l'ennemi.
+     * Ajoute une nouvelle position d'ennemi.
      *
-     * @param enemy        l'ennemi à mettre à jour
-     * @param timeDetected le temps de détection
+     * @param enemy la nouvelle position de l'ennemi
      */
     private void addNewEnemy(Enemy enemy) {
         ArrayList<Enemy> toRemove = new ArrayList<>();
         for (Enemy existingEnemy : enemies) {
-            // Si la position est dans le rayon de la position déjà enregistrée
-            if (existingEnemy.isInRadius(enemy) && enemy.timeLastDetected > existingEnemy.timeLastDetected) {
-                toRemove.add(existingEnemy);
-            }
-        }
-        for (Enemy enemyToRemove : toRemove) {
-            removeEnnemyPosition(enemyToRemove);
-        }
-
-        enemies.add(enemy);
-    }
-
-    /**
-     * Supprime la position de l'ennemi.
-     *
-     * @param enemy l'ennemi à supprimer
-     */
-    private void removeEnnemyPosition(Enemy enemy) {
-        ArrayList<Enemy> toRemove = new ArrayList<>();
-        for (Enemy existingEnemy : enemies) {
-            if ((existingEnemy.equals(enemy) || existingEnemy.isInRadius(enemy)) && enemy.timeLastDetected < existingEnemy.timeLastDetected) {
+            if (existingEnemy.isInRadius(enemy)) {
                 toRemove.add(existingEnemy);
             }
         }
         for (Enemy enemyToRemove : toRemove) {
             enemies.remove(enemyToRemove);
         }
+
+        //System.out.println("Removing " + toRemove.size() + " enemies / Remaining : " + enemies.size());
+        //System.out.println(robotName + "# " + enemy.toString());
+
+        enemies.add(enemy);
     }
+
 
     /**
      * Incrémente le temps de position de l'ennemi.
@@ -566,7 +575,6 @@ public class MecaMouseSecondary extends Brain {
                 }
             }
         }
-
         enemies.removeAll(toRemove);
         broadcastEnemyPositions();
     }
@@ -578,6 +586,8 @@ public class MecaMouseSecondary extends Brain {
      */
     private void addWreck(Position position) {
         boolean isNewWreck = true;
+
+        // Ajouter l'épave si elle n'existe pas déjà
         for (Position wreck : wrecks) {
             if (wreck.equals(position) || wreck.isInRadius(position)) {
                 isNewWreck = false;
@@ -586,6 +596,19 @@ public class MecaMouseSecondary extends Brain {
         if (isNewWreck) {
             wrecks.add(position);
         }
+
+        // Retirer les ennemis à la position de l'épave
+        ArrayList<Enemy> toRemove = new ArrayList<>();
+        for (Enemy existingEnemy : enemies) {
+            if (position.isInRadius(existingEnemy.position)) {
+                toRemove.add(existingEnemy);
+            }
+        }
+
+        for (Enemy enemyToRemove : toRemove) {
+            enemies.remove(enemyToRemove);
+        }
+
     }
 
     /**
