@@ -311,15 +311,14 @@ public class MecaMouseSecondary extends Brain {
     private void processDetectionMessage(int bot, String message) {
         String[] parts = message.split(":");
 
-        int botId = Integer.parseInt(parts[0]);
         IRadarResult.Types botType = IRadarResult.Types.valueOf(parts[1]);
         Position botPosition = new Position(Integer.parseInt(parts[2]), Integer.parseInt(parts[3]));
         double botHeading = Double.parseDouble(parts[4]);
         int botTimeLastDetected = Integer.parseInt(parts[5]);
+        boolean botIsMoving = Boolean.parseBoolean(parts[6]);
 
-        Enemy enemy = new Enemy(botType, botPosition, botHeading, botTimeLastDetected);
+        Enemy enemy = new Enemy(botType, botPosition, botHeading, botTimeLastDetected, botIsMoving);
         addNewEnemy(enemy);
-
     }
 
     /**
@@ -495,11 +494,11 @@ public class MecaMouseSecondary extends Brain {
 
             if (o.getObjectType() == IRadarResult.Types.OpponentMainBot || o.getObjectType() == IRadarResult.Types.OpponentSecondaryBot) {
 
-                Enemy enemy = new Enemy(o.getObjectType(), new Position(enemyX, enemyY), o.getObjectDirection(), 0);
+                Enemy enemy = new Enemy(o.getObjectType(), new Position(enemyX, enemyY), o.getObjectDirection(), 0, false);
                 addNewEnemy(enemy);
                 sendBroadcastMessage(DETECTION, enemy.toString());
 
-                if (o.getObjectDistance() <= Parameters.teamASecondaryBotFrontalDetectionRange - 200) {
+                if (o.getObjectDistance() <= Parameters.teamASecondaryBotFrontalDetectionRange - 100) {
                     isEscaping = true;
                 }
             }
@@ -633,8 +632,8 @@ public class MecaMouseSecondary extends Brain {
     }
 
     static class Enemy extends MecaMouseMain.Enemy {
-        public Enemy(IRadarResult.Types type, Position position, double direction, int timeLastDetected) {
-            super(type, position, direction, timeLastDetected);
+        public Enemy(IRadarResult.Types type, Position position, double direction, int timeLastDetected, boolean isMoving) {
+            super(type, position, direction, timeLastDetected, isMoving);
         }
     }
 }

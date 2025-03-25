@@ -41,7 +41,6 @@ public class MecaMouseMain extends Brain {
     private INSTRUCTIONS instruction = INSTRUCTIONS.BASE;
     private String robotName;
     private double directionToGo;
-    private boolean isMoving = false;
     private boolean isSecondaryInPosition = false;
     private boolean isInPosition = false;
 
@@ -51,9 +50,15 @@ public class MecaMouseMain extends Brain {
 
     private boolean freezed = false;
 
+    private static final int AVOID_TIME = 200;
+    private int avoidTime = 0;
+    private boolean avoided = false;
+    private Position avoidWreck = new Position(-1, -1);
+
     // Enemy target tracking variables
     private static final int MAX_ENEMY_POSITION_TIME = 500;
     private Position targetPosition = new Position(-1, -1);
+    private boolean isTargetMoving = false;
     private boolean hasATarget = false;
 
     // Lists for tracking allies, enemies, and wrecks
@@ -86,7 +91,6 @@ public class MecaMouseMain extends Brain {
         incrementEnemyPositionTime();
         checkOptimizeTarget();
 
-        isMoving = false;
 
         // Handle firing orders and execute current instruction
         if (handleFireOrder()) {
@@ -213,6 +217,59 @@ public class MecaMouseMain extends Brain {
             positionRobot();
             return;
         }
+
+//        if(avoided) {
+//            int avoidY = 0;
+//            double newDirection = 0.0;
+//            switch (currentBot.id) {
+//                case GAMMA, BETA :
+//                    avoidY = avoidWreck.y + (BOT_RADIUS * 2);
+//                    newDirection = Parameters.NORTH;
+//                default :
+//                    avoidY = avoidWreck.y - (BOT_RADIUS * 2);
+//                    newDirection = Parameters.SOUTH;
+//            };
+//
+//            if(currentBot.position.y != avoidY) {
+//                if(isSameDirection(myGetHeading(), newDirection)) {
+//                    moveForward();
+//                } else {
+//                    stepTurn(currentBot.id == GAMMA ?
+//                            (isTeamA ? Parameters.Direction.RIGHT : Parameters.Direction.LEFT) :
+//                            (isTeamA ? Parameters.Direction.LEFT : Parameters.Direction.RIGHT));
+//                }
+//            } else {
+//                if(isSameDirection(myGetHeading(), directionToGo)) {
+//                    if(directionToGo == Parameters.EAST) {
+//                        if(currentBot.position.x < avoidWreck.x + (2 * BOT_RADIUS)) {
+//                            moveForward();
+//                        } else {
+//                            if(isSameDirection(myGetHeading(), newDirection + Math.PI/2)) {
+//                                moveForward();
+//                            } else {
+//                                avoided = false;
+//                                avoidWreck = new Position(-1,-1);
+//                            }
+//                        }
+//                    } else {
+//                        if(currentBot.position.x > avoidWreck.x - (2 * BOT_RADIUS)) {
+//                            moveForward();
+//                        } else {
+//                            if(isSameDirection(myGetHeading(), newDirection + Math.PI/2)) {
+//                                moveForward();
+//                            } else {
+//                                avoided = false;
+//                                avoidWreck = new Position(-1,-1);
+//                            }
+//                        }
+//                    }
+//                } else {
+//                    stepTurn(currentBot.id == GAMMA ?
+//                            (isTeamA ? Parameters.Direction.RIGHT : Parameters.Direction.LEFT) :
+//                            (isTeamA ? Parameters.Direction.LEFT : Parameters.Direction.RIGHT));
+//                }
+//            }
+//        }
 
         // Handle movement
         moveRobot();
@@ -359,8 +416,9 @@ public class MecaMouseMain extends Brain {
         Position botPosition = new Position(Integer.parseInt(parts[2]), Integer.parseInt(parts[3]));
         double botHeading = Double.parseDouble(parts[4]);
         int botTimeLastDetected = Integer.parseInt(parts[5]);
+        boolean botIsMoving = Boolean.parseBoolean(parts[6]);
 
-        Enemy enemy = new Enemy(botType, botPosition, botHeading, botTimeLastDetected);
+        Enemy enemy = new Enemy(botType, botPosition, botHeading, botTimeLastDetected, botIsMoving);
         addNewEnemy(enemy);
     }
 
@@ -425,7 +483,7 @@ public class MecaMouseMain extends Brain {
      * Displays debug information in logs.
      */
     private void showLogDetails() {
-        sendLogMessage(robotName + " [" + currentBot.position.toString() + "] / Target: " + targetPosition.toString() + " InPosition: " + isInPosition);
+        sendLogMessage(robotName + " [" + currentBot.position + "] / Target: " + targetPosition + " (" + isTargetMoving + ")");
     }
 
     /**
@@ -483,8 +541,15 @@ public class MecaMouseMain extends Brain {
      * @return true if fired, false otherwise
      */
     private boolean fireAtTarget(Position position) {
-        double angle = calculateFiringAngle(position);
-        boolean hasToFire = isWithinFiringRange(position) &&
+        int randomGapX = (int) (( (Math.random()-0.5) * (2 * BOT_RADIUS)));
+        int randomGapY = (int) (( (Math.random()-0.5) * (2 * BOT_RADIUS)));
+
+        System.out.println(randomGapX + " / " + randomGapY);
+
+        Position newPosition = new Position(position.x + randomGapX, position.y + randomGapY);
+
+        double angle = calculateFiringAngle(newPosition);
+        boolean hasToFire = isWithinFiringRange(newPosition) &&
                 !isAllyInLineOfFire(angle) &&
                 !isWreckInLineOfFire(angle);
         if (hasToFire) {
@@ -576,13 +641,13 @@ public class MecaMouseMain extends Brain {
             Position predictedPosition = predictEnemyPosition(enemy);
             if (optimizeTargetPosition.x == -1 && optimizeTargetPosition.y == -1) {
                 optimizeTargetPosition = predictedPosition;
-                continue;
             }
 
-            if (calculateDistanceToTarget(predictedPosition) < calculateDistanceToTarget(optimizeTargetPosition)) {
+            if (calculateDistanceToTarget(predictedPosition) <= calculateDistanceToTarget(optimizeTargetPosition)) {
                 double fireAngle = calculateFiringAngle(predictedPosition);
                 if (!isWreckInLineOfFire(fireAngle) && !isAllyInLineOfFire(fireAngle)) {
                     optimizeTargetPosition = predictedPosition;
+                    isTargetMoving = enemy.isMoving;
                 }
             }
         }
@@ -611,7 +676,6 @@ public class MecaMouseMain extends Brain {
         if (detectFront().getObjectType() == IFrontSensorResult.Types.NOTHING) {
             move();
             updatePosition((int) Parameters.teamAMainBotSpeed);
-            isMoving = true;
         }
     }
 
@@ -624,10 +688,8 @@ public class MecaMouseMain extends Brain {
         if(currentBot.position.x - (int) (Parameters.teamASecondaryBotSpeed * Math.cos(myGetHeading())) < 0 || currentBot.position.y - (int) (Parameters.teamASecondaryBotSpeed * Math.sin(myGetHeading())) < 0) {
             return;
         }
-
         moveBack();
         updatePosition(-(int) Parameters.teamASecondaryBotSpeed);
-        isMoving = true;
     }
 
     /**
@@ -692,7 +754,7 @@ public class MecaMouseMain extends Brain {
                     o.getObjectType() == IRadarResult.Types.OpponentSecondaryBot) {
                 hasATarget = true;
                 Enemy enemy = new Enemy(o.getObjectType(), new Position(enemyX, enemyY),
-                        o.getObjectDirection(), 0);
+                        o.getObjectDirection(), 0, false);
                 addNewEnemy(enemy);
                 sendBroadcastMessage(DETECTION, enemy.toString());
             }
@@ -701,9 +763,14 @@ public class MecaMouseMain extends Brain {
                     hasATarget = false;
                 }
 
-                Position position = new Position(enemyX, enemyY);
-                addWreck(position);
-                sendBroadcastMessage(DEAD, position.toString());
+                Position wreck = new Position(enemyX, enemyY);
+                addWreck(wreck);
+                sendBroadcastMessage(DEAD, wreck.toString());
+
+                if(isSameDirection(calculateFiringAngle(wreck), directionToGo) && calculateDistanceToTarget(wreck) < 2 * BOT_RADIUS) {
+                    avoided = true;
+                    avoidWreck = wreck;
+                }
             }
         }
     }
@@ -757,8 +824,18 @@ public class MecaMouseMain extends Brain {
                 if (enemy1.isInRadius(enemy2)) {
                     if (enemy1.timeLastDetected > enemy2.timeLastDetected) {
                         toRemove.add(enemy1);
+                        if(enemy1.position == enemy2.position) {
+                            enemy2.isMoving = false;
+                        } else {
+                            enemy2.isMoving = true;
+                        }
                     } else {
                         toRemove.add(enemy2);
+                        if(enemy1.position == enemy2.position) {
+                            enemy1.isMoving = false;
+                        } else {
+                            enemy1.isMoving = true;
+                        }
                     }
                 }
             }
@@ -814,8 +891,17 @@ public class MecaMouseMain extends Brain {
      * @return the predicted position
      */
     private Position predictEnemyPosition(Enemy enemy) {
-        int predictedX = enemy.x + (int) (enemy.getSpeed() * Math.cos(enemy.direction));
-        int predictedY = enemy.y + (int) (enemy.getSpeed() * Math.sin(enemy.direction));
+        int predictedX = 0;
+        int predictedY = 0;
+
+        if(enemy.isMoving) {
+            predictedX = enemy.x + (int) (enemy.getSpeed() * Math.cos(enemy.direction) * enemy.timeLastDetected);
+            predictedY = enemy.y + (int) (enemy.getSpeed() * Math.sin(enemy.direction) * enemy.timeLastDetected);
+        } else {
+            predictedX = enemy.x;
+            predictedY = enemy.y;
+        }
+
         return new Position(predictedX, predictedY);
     }
 
@@ -918,10 +1004,12 @@ public class MecaMouseMain extends Brain {
      */
     static class Enemy extends Bot {
         int timeLastDetected;
+        boolean isMoving;
 
-        Enemy(IRadarResult.Types type, Position position, double direction, int timeLastDetected) {
+        Enemy(IRadarResult.Types type, Position position, double direction, int timeLastDetected, boolean isMoving) {
             super(0, type, position, direction);
             this.timeLastDetected = timeLastDetected;
+            this.isMoving = isMoving;
         }
 
         public void setTimeLastDetected(int timeLastDetected) {
@@ -934,7 +1022,7 @@ public class MecaMouseMain extends Brain {
 
         @Override
         public String toString() {
-            return super.toString() + ":" + timeLastDetected;
+            return super.toString() + ":" + timeLastDetected + ':' + isMoving;
         }
 
         @Override
