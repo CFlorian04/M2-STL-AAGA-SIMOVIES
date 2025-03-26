@@ -9,6 +9,7 @@
   </target>
   <target name="compile" depends="clean,init" description="compile the source">
     <javac debug="true" srcdir="${src}" classpath="jars/simulator.jar" excludes="" destdir="${build}"/>
+    <javac debug="true" srcdir="${src}" classpath="jars/simulator.jar" excludes="" destdir="${build}"/>
   </target>
   <target name="run" depends="compile" description="run examples">
     <echo>================ Run Object Main ================</echo>

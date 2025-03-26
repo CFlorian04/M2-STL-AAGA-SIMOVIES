@@ -45,7 +45,7 @@ public class MecaMouseMain extends Brain {
     private boolean isInPosition = false;
 
     // Firing control variables
-    private boolean fireOrder = false;
+    private boolean blindFireRight = false;
     private int fireRhythm = 0;
 
     private boolean freezed = false;
@@ -65,6 +65,11 @@ public class MecaMouseMain extends Brain {
     private final ArrayList<Bot> allies = new ArrayList<>();
     private final ArrayList<Enemy> enemies = new ArrayList<>();
     private final ArrayList<Position> wrecks = new ArrayList<>();
+
+    // Variables for avoiding wrecks
+    private boolean isAvoidingWreck = false;
+    private Position wreckToAvoid = new Position(0, 0);
+    private boolean isAvoidingWreckOnRight = false;
 
     // Default constructor
     public MecaMouseMain() {
@@ -91,6 +96,16 @@ public class MecaMouseMain extends Brain {
         incrementEnemyPositionTime();
         checkOptimizeTarget();
 
+        // Changer la direction des blindFire en fonction de sa position et de son orientation
+        if (blindFireRight) {
+            if (isSameDirection(myGetHeading(), Parameters.EAST) && currentBot.position.x < 1500) {
+                blindFireRight = true;
+            }
+        } else {
+            if (isSameDirection(myGetHeading(), Parameters.WEST) && currentBot.position.x > 500) {
+                blindFireRight = false;
+            }
+        }
 
         // Handle firing orders and execute current instruction
         if (handleFireOrder()) {
@@ -99,6 +114,11 @@ public class MecaMouseMain extends Brain {
 
         if(freezed) {
             fireAtTarget(targetPosition);
+            return;
+        }
+
+        if (isAvoidingWreck) {
+            avoidWreck(wreckToAvoid);
             return;
         }
 
@@ -218,59 +238,6 @@ public class MecaMouseMain extends Brain {
             return;
         }
 
-//        if(avoided) {
-//            int avoidY = 0;
-//            double newDirection = 0.0;
-//            switch (currentBot.id) {
-//                case GAMMA, BETA :
-//                    avoidY = avoidWreck.y + (BOT_RADIUS * 2);
-//                    newDirection = Parameters.NORTH;
-//                default :
-//                    avoidY = avoidWreck.y - (BOT_RADIUS * 2);
-//                    newDirection = Parameters.SOUTH;
-//            };
-//
-//            if(currentBot.position.y != avoidY) {
-//                if(isSameDirection(myGetHeading(), newDirection)) {
-//                    moveForward();
-//                } else {
-//                    stepTurn(currentBot.id == GAMMA ?
-//                            (isTeamA ? Parameters.Direction.RIGHT : Parameters.Direction.LEFT) :
-//                            (isTeamA ? Parameters.Direction.LEFT : Parameters.Direction.RIGHT));
-//                }
-//            } else {
-//                if(isSameDirection(myGetHeading(), directionToGo)) {
-//                    if(directionToGo == Parameters.EAST) {
-//                        if(currentBot.position.x < avoidWreck.x + (2 * BOT_RADIUS)) {
-//                            moveForward();
-//                        } else {
-//                            if(isSameDirection(myGetHeading(), newDirection + Math.PI/2)) {
-//                                moveForward();
-//                            } else {
-//                                avoided = false;
-//                                avoidWreck = new Position(-1,-1);
-//                            }
-//                        }
-//                    } else {
-//                        if(currentBot.position.x > avoidWreck.x - (2 * BOT_RADIUS)) {
-//                            moveForward();
-//                        } else {
-//                            if(isSameDirection(myGetHeading(), newDirection + Math.PI/2)) {
-//                                moveForward();
-//                            } else {
-//                                avoided = false;
-//                                avoidWreck = new Position(-1,-1);
-//                            }
-//                        }
-//                    }
-//                } else {
-//                    stepTurn(currentBot.id == GAMMA ?
-//                            (isTeamA ? Parameters.Direction.RIGHT : Parameters.Direction.LEFT) :
-//                            (isTeamA ? Parameters.Direction.LEFT : Parameters.Direction.RIGHT));
-//                }
-//            }
-//        }
-
         // Handle movement
         moveRobot();
     }
@@ -317,10 +284,19 @@ public class MecaMouseMain extends Brain {
                 if (detectFront().getObjectType() == IFrontSensorResult.Types.TeamMainBot ||
                         detectFront().getObjectType() == IFrontSensorResult.Types.TeamSecondaryBot) {
                     handleTeammateFront();
-                } else {
+                } else if(detectFront().getObjectType() != IFrontSensorResult.Types.Wreck) {
                     reverseDirectionToGo();
                 }
             } else {
+                // Vérifier s'il y a une épave sur le chemin
+                for (Position wreck : wrecks) {
+                    if (currentBot.position.isInIncreaseRadius(wreck)) {
+                        isAvoidingWreck = true;
+                        isAvoidingWreckOnRight = currentBot.position.x < wreck.x;
+                        wreckToAvoid = wreck;
+                        return;
+                    }
+                }
                 moveForward();
             }
         } else {
@@ -483,7 +459,11 @@ public class MecaMouseMain extends Brain {
      * Displays debug information in logs.
      */
     private void showLogDetails() {
-        sendLogMessage(robotName + " [" + currentBot.position + "] / Target: " + targetPosition + " (" + isTargetMoving + ")");
+        if(isAvoidingWreck) {
+            sendLogMessage(robotName + " [" + currentBot.position.toString() + "] / Avoiding wreck [" + wreckToAvoid.toString() + "] on right : " + isAvoidingWreckOnRight);
+            return;
+        }
+        sendLogMessage(robotName + " [" + currentBot.position.toString() + "] / Target: " + targetPosition + " (" + isTargetMoving + ")");
     }
 
     /**
@@ -493,7 +473,6 @@ public class MecaMouseMain extends Brain {
      */
     private void firePosition(Position position) {
         targetPosition = position;
-        fireOrder = true;
     }
 
     /**
@@ -503,9 +482,9 @@ public class MecaMouseMain extends Brain {
         int randomGap = (int) ((Math.random() * (2 * BOT_RADIUS) - BOT_RADIUS));
         if (fireRhythm == 0) {
             Position blindPosition = new Position(
-                    isTeamA ?
-                            currentBot.position.x + (int) Parameters.bulletRange - BOT_RADIUS :
-                            currentBot.position.x - (int) Parameters.bulletRange + BOT_RADIUS,
+                    blindFireRight ?
+                            currentBot.position.x - (int) Parameters.bulletRange + BOT_RADIUS :
+                            currentBot.position.x + (int) Parameters.bulletRange - BOT_RADIUS,
                     currentBot.position.y + randomGap
             );
 
@@ -523,7 +502,7 @@ public class MecaMouseMain extends Brain {
      * @return true if a shot was fired, false otherwise
      */
     private boolean handleFireOrder() {
-        if (fireOrder && fireRhythm == 0 && hasATarget) {
+        if (fireRhythm == 0 && hasATarget) {
             fireRhythm++;
             if (fireAtTarget(targetPosition)) {
                 return true;
@@ -541,20 +520,29 @@ public class MecaMouseMain extends Brain {
      * @return true if fired, false otherwise
      */
     private boolean fireAtTarget(Position position) {
-        int randomGapX = (int) (( (Math.random()-0.5) * (2 * BOT_RADIUS)));
-        int randomGapY = (int) (( (Math.random()-0.5) * (2 * BOT_RADIUS)));
+        boolean hasToFire = false;
+        int attempts = 0;
+        int maxAttempts = 15;
 
-        System.out.println(randomGapX + " / " + randomGapY);
+        while (!hasToFire && attempts < maxAttempts) {
+            attempts++;
+            int randomGapX = (int) ((Math.random() - 0.5) * (2 * BOT_RADIUS));
+            int randomGapY = (int) ((Math.random() - 0.5) * (2 * BOT_RADIUS));
 
-        Position newPosition = new Position(position.x + randomGapX, position.y + randomGapY);
+            System.out.println(randomGapX + " / " + randomGapY);
 
-        double angle = calculateFiringAngle(newPosition);
-        boolean hasToFire = isWithinFiringRange(newPosition) &&
-                !isAllyInLineOfFire(angle) &&
-                !isWreckInLineOfFire(angle);
-        if (hasToFire) {
-            fire(angle);
+            Position newPosition = new Position(position.x + randomGapX, position.y + randomGapY);
+
+            double angle = calculateFiringAngle(newPosition);
+            hasToFire = isWithinFiringRange(newPosition) &&
+                    !isAllyInLineOfFire(angle) &&
+                    !isWreckInLineOfFire(angle);
+
+            if (hasToFire) {
+                fire(angle);
+            }
         }
+
         return hasToFire;
     }
 
@@ -657,7 +645,6 @@ public class MecaMouseMain extends Brain {
             hasATarget = true;
         } else {
             hasATarget = false;
-            fireOrder = false;
             targetPosition = new Position(-1, -1);
         }
 
@@ -905,12 +892,54 @@ public class MecaMouseMain extends Brain {
         return new Position(predictedX, predictedY);
     }
 
-    private void printEnemies() {
-        String message = "";
-        for (Enemy enemy : enemies) {
-            message += " [" + enemy.position.toString() + " / " + enemy.timeLastDetected + "] ";
+    /**
+     * Vérifie si une épave est sur le chemin du robot.
+     *
+     * @param wreck la position de l'épave
+     * @return true si l'épave est sur le chemin, false sinon
+     */
+    private boolean isWreckInPath(Position wreck) {
+        double distanceToWreck = calculateDistanceToTarget(wreck);
+        double angleToWreck = calculateFiringAngle(wreck);
+        return distanceToWreck < BOT_RADIUS * 2 && angleToWreck < ANGLE_PRECISION;
+    }
+
+    /**
+     * Contourne une épave en modifiant la direction du robot.
+     *
+     * @param wreck la position de l'épave
+     */
+    private void avoidWreck(Position wreck) {
+        if(currentBot.isInRadius(wreck)) {
+            moveBackward();
+            return;
         }
-        System.out.println(message);
+        if( (isAvoidingWreckOnRight && currentBot.position.y < wreck.y + BOT_RADIUS * 1.5) || (!isAvoidingWreckOnRight && currentBot.position.y > wreck.y - BOT_RADIUS * 1.5)) {
+            if(isSameDirection(myGetHeading(), Parameters.SOUTH)) {
+                moveForward();
+            } else {
+                stepTurn(isTeamA ? Parameters.Direction.RIGHT : Parameters.Direction.LEFT);
+            }
+        } else if( (isAvoidingWreckOnRight && currentBot.position.x < wreck.x + BOT_RADIUS * 1.5) || (!isAvoidingWreckOnRight && currentBot.position.x > wreck.x - BOT_RADIUS * 1.5)) {
+            if(isSameDirection(myGetHeading(), directionToGo)) {
+                moveForward();
+            } else {
+                stepTurn(isTeamA ? Parameters.Direction.LEFT : Parameters.Direction.RIGHT);
+            }
+        } else if( (isAvoidingWreckOnRight && currentBot.position.y > wreck.y + BOT_RADIUS * 1.5) || (!isAvoidingWreckOnRight && currentBot.position.y < wreck.y - BOT_RADIUS * 1.5)) {
+            if(isSameDirection(myGetHeading(), Parameters.NORTH)) {
+                moveForward();
+            } else {
+                stepTurn(isTeamA ? Parameters.Direction.LEFT : Parameters.Direction.RIGHT);
+            }
+        } else {
+            if(isSameDirection(myGetHeading(), directionToGo)) {
+                isAvoidingWreck = false;
+                return;
+            } else {
+                stepTurn(isTeamA ? Parameters.Direction.RIGHT : Parameters.Direction.LEFT);
+            }
+        }
     }
 
     /**
@@ -946,6 +975,12 @@ public class MecaMouseMain extends Brain {
             if (o == null || getClass() != o.getClass()) return false;
             Position position = (Position) o;
             return Math.sqrt(Math.pow((x - position.x), 2) + Math.pow((y - position.y), 2)) <= BOT_RADIUS;
+        }
+
+        public boolean isInIncreaseRadius(Object o) {
+            if (o == null || getClass() != o.getClass()) return false;
+            Position position = (Position) o;
+            return Math.sqrt(Math.pow((x - position.x), 2) + Math.pow((y - position.y), 2)) <= 1.5 * BOT_RADIUS;
         }
 
         @Override

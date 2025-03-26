@@ -9,7 +9,7 @@ import java.util.*;
 
 public class MecaMouseSecondary extends Brain {
     // Constantes de précision et d'identification
-    private static final double ANGLE_PRECISION = 0.05;
+    private static final double ANGLE_PRECISION = 0.02;
     private static final double FIRE_ANGLE_PRECISION = Math.PI / 6;
     private static final int BOT_RADIUS = (int) Parameters.teamAMainBotRadius;
     private static final int ROCKY = 0x004;
@@ -52,6 +52,10 @@ public class MecaMouseSecondary extends Brain {
     private int escapeTime = 0;
     private boolean isEscaping = false;
 
+    private boolean isAvoidingWreck = false;
+    private Position wreckToAvoid = new Position(0, 0);
+    private boolean isAvoidingWreckOnRight = false;
+
     // Variables pour suivre la position de la cible ennemie
     private static final int MAX_ENEMY_POSITION_TIME = 500;
 
@@ -88,6 +92,11 @@ public class MecaMouseSecondary extends Brain {
         incrementEnemyPositionTime(); // Incrémentation du temps de position des ennemis
 
         isMoving = false;
+
+        if (isAvoidingWreck) {
+            avoidWreck(wreckToAvoid);
+            return;
+        }
 
         if (isEscaping) {
             escapeTime++;
@@ -231,6 +240,15 @@ public class MecaMouseSecondary extends Brain {
             if (detectFront().getObjectType() != IFrontSensorResult.Types.NOTHING) {
                 reverseDirectionToGo();
             } else {
+                // Vérifier s'il y a une épave sur le chemin
+                for (Position wreck : wrecks) {
+                    if (currentBot.position.isInIncreaseRadius(wreck)) {
+                        isAvoidingWreck = true;
+                        isAvoidingWreckOnRight = currentBot.position.x < wreck.x;
+                        wreckToAvoid = wreck;
+                        return;
+                    }
+                }
                 moveForward();
             }
         } else {
@@ -386,6 +404,10 @@ public class MecaMouseSecondary extends Brain {
      * Affiche des informations de débogage dans les logs.
      */
     private void showLogDetails() {
+        if(isAvoidingWreck) {
+            sendLogMessage(robotName + " [" + currentBot.position.toString() + "] / Avoiding wreck [" + wreckToAvoid.toString() + "] on right : " + isAvoidingWreckOnRight);
+            return;
+        }
         sendLogMessage(robotName + " [" + currentBot.position.toString() + "]");
     }
 
@@ -579,6 +601,26 @@ public class MecaMouseSecondary extends Brain {
     }
 
     /**
+     * Calculates the firing angle to the target.
+     *
+     * @param position the target position
+     * @return the firing angle in radians
+     */
+    private double calculateFiringAngle(MecaMouseMain.Position position) {
+        if (position.x == currentBot.position.x) {
+            return (position.y > currentBot.position.y) ? Math.PI / 2 : 3 * Math.PI / 2;
+        } else {
+            double angle = Math.atan((double) (position.y - currentBot.position.y) / (position.x - currentBot.position.x));
+            if (position.x < currentBot.position.x) {
+                angle += Math.PI;
+            } else if (position.y < currentBot.position.y) {
+                angle += 2 * Math.PI;
+            }
+            return angle;
+        }
+    }
+
+    /**
      * Ajoute une épave à la liste des épaves.
      *
      * @param position la position de l'épave
@@ -608,6 +650,56 @@ public class MecaMouseSecondary extends Brain {
             enemies.remove(enemyToRemove);
         }
 
+    }
+
+    /**
+     * Vérifie si une épave est sur le chemin du robot.
+     *
+     * @param wreck la position de l'épave
+     * @return true si l'épave est sur le chemin, false sinon
+     */
+    private boolean isWreckInPath(Position wreck) {
+        double distanceToWreck = calculateDistanceToTarget(wreck);
+        double angleToWreck = calculateFiringAngle(wreck);
+        return distanceToWreck < BOT_RADIUS * 2 && angleToWreck < ANGLE_PRECISION;
+    }
+
+    /**
+     * Contourne une épave en modifiant la direction du robot.
+     *
+     * @param wreck la position de l'épave
+     */
+    private void avoidWreck(Position wreck) {
+        if(currentBot.isInRadius(wreck)) {
+            moveBackward();
+            return;
+        }
+        if( (isAvoidingWreckOnRight && currentBot.position.y < wreck.y + BOT_RADIUS * 1.5) || (!isAvoidingWreckOnRight && currentBot.position.y > wreck.y - BOT_RADIUS * 1.5)) {
+            if(isSameDirection(myGetHeading(), Parameters.SOUTH)) {
+                moveForward();
+            } else {
+                stepTurn(isTeamA ? Parameters.Direction.RIGHT : Parameters.Direction.LEFT);
+            }
+        } else if( (isAvoidingWreckOnRight && currentBot.position.x < wreck.x + BOT_RADIUS * 1.5) || (!isAvoidingWreckOnRight && currentBot.position.x > wreck.x - BOT_RADIUS * 1.5)) {
+            if(isSameDirection(myGetHeading(), directionToGo)) {
+                moveForward();
+            } else {
+                stepTurn(isTeamA ? Parameters.Direction.LEFT : Parameters.Direction.RIGHT);
+            }
+        } else if( (isAvoidingWreckOnRight && currentBot.position.y > wreck.y + BOT_RADIUS * 1.5) || (!isAvoidingWreckOnRight && currentBot.position.y < wreck.y - BOT_RADIUS * 1.5)) {
+            if(isSameDirection(myGetHeading(), Parameters.NORTH)) {
+                moveForward();
+            } else {
+                stepTurn(isTeamA ? Parameters.Direction.LEFT : Parameters.Direction.RIGHT);
+            }
+        } else {
+            if(isSameDirection(myGetHeading(), directionToGo)) {
+                isAvoidingWreck = false;
+                return;
+            } else {
+                stepTurn(isTeamA ? Parameters.Direction.RIGHT : Parameters.Direction.LEFT);
+            }
+        }
     }
 
     /**
